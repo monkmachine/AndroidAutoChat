@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:orientation="vertical">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Android Auto LLM Bot"
+        android:textSize="24sp"
+        android:padding="16dp"/>
+
+    <RadioGroup
+        android:id="@+id/rg_provider"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center">
+        <RadioButton
+            android:id="@+id/rb_openai"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="OpenAI"
+            android:checked="true"/>
+        <RadioButton
+            android:id="@+id/rb_gemini"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Gemini"/>
+    </RadioGroup>
+
+    <EditText
+        android:id="@+id/et_openai_key"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="OpenAI API Key (sk-...)"
+        android:padding="12dp"/>
+
+    <EditText
+        android:id="@+id/et_gemini_key"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Gemini API Key"
+        android:padding="12dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+        
+        <Spinner
+            android:id="@+id/sp_gemini_model"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:padding="12dp"/>
+            
+        <Button
+            android:id="@+id/btn_refresh_models"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Refresh"
+            android:layout_marginStart="8dp"/>
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/btn_save"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Save Settings"
+        android:layout_marginBottom="24dp"/>
+
+    <Button
+        android:id="@+id/btn_start_sim"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Simulate Incoming Message" />
+
+</LinearLayout>
