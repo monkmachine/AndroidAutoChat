@@ -21,20 +21,37 @@ class GeminiProvider(private val apiKey: String, private val systemPrompt: Strin
         
         val contentsArray = JsonArray()
         
-        // Add System Prompt as "user" message at start (simple pseudo-system prompt)
-        // or actually use system_instruction if available, but REST JSON simple mode:
-        // We'll just prepend context to the current message for simplicity in this MVP.
+        // 1. Add History
+        history.forEach { entry ->
+            val role = if (entry["role"] == "assistant") "model" else "user"
+            val text = entry["content"] ?: ""
+            
+            val part = JsonObject()
+            part.addProperty("text", text)
+            val parts = JsonArray()
+            parts.add(part)
+            
+            val content = JsonObject()
+            content.addProperty("role", role)
+            content.add("parts", parts)
+            
+            contentsArray.add(content)
+        }
         
-        val partsArray = JsonArray()
-        val part = JsonObject()
-        part.addProperty("text", "System: $systemPrompt\n\nUser: $message")
-        partsArray.add(part)
+        // 2. Add Current Message (User)
+        // If history is empty, prepend system prompt to this message
+        val finalMessage = if (history.isEmpty()) "System: $systemPrompt\n\nUser: $message" else message
         
-        val contentObj = JsonObject()
-        contentObj.addProperty("role", "user")
-        contentObj.add("parts", partsArray)
+        val currentPart = JsonObject()
+        currentPart.addProperty("text", finalMessage)
+        val currentParts = JsonArray()
+        currentParts.add(currentPart)
         
-        contentsArray.add(contentObj)
+        val currentContent = JsonObject()
+        currentContent.addProperty("role", "user")
+        currentContent.add("parts", currentParts)
+        
+        contentsArray.add(currentContent)
 
         val jsonBody = JsonObject()
         jsonBody.add("contents", contentsArray)

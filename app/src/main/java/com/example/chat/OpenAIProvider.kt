@@ -18,7 +18,11 @@ class OpenAIProvider(private val apiKey: String, private val systemPrompt: Strin
             // Reconstruct messages array
             val messagesList = mutableListOf<Map<String, String>>()
             messagesList.add(mapOf("role" to "system", "content" to systemPrompt))
-            // Add history here if we had it
+            
+            // Add history
+            messagesList.addAll(history)
+            
+            // Add current message
             messagesList.add(mapOf("role" to "user", "content" to message))
             
             add("messages", gson.toJsonTree(messagesList))

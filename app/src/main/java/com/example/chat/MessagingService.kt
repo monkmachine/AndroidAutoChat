@@ -16,10 +16,12 @@ class MessagingService : Service() {
 
     companion object {
         const val CHANNEL_ID = "bot_channel"
-        const val NOTIFICATION_ID = 1
         const val ACTION_REPLY = "com.example.chat.ACTION_REPLY"
         const val KEY_TEXT_REPLY = "key_text_reply"
+        const val KEY_NOTIFICATION_ID = "key_notification_id"
     }
+    // In-memory history map: NotificationID -> List of Messages
+    private val conversationHistory = mutableMapOf<Int, MutableList<Map<String, String>>>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -27,10 +29,30 @@ class MessagingService : Service() {
         createNotificationChannel()
 
         if (intent?.action == "com.example.chat.SIMULATE_MESSAGE") {
-            sendBotMessage("Hello! I am ready. What would you like to talk about?")
+            // Start a NEW conversation with a unique ID
+            val notificationId = System.currentTimeMillis().toInt()
+            val history = mutableListOf<Map<String, String>>()
+            
+            val welcome = "Hello! I am ready. What would you like to talk about?"
+            history.add(mapOf("role" to "assistant", "content" to welcome))
+            
+            conversationHistory[notificationId] = history
+            sendBotMessage(notificationId)
+            
         } else if (intent?.action == ACTION_REPLY) {
+            val notificationId = intent.getIntExtra(KEY_NOTIFICATION_ID, -1)
+            if (notificationId == -1) return START_NOT_STICKY // Should not happen
+
+            val history = conversationHistory[notificationId] ?: return START_NOT_STICKY
+
             val remoteInput = RemoteInput.getResultsFromIntent(intent)
             val replyText = remoteInput?.getCharSequence(KEY_TEXT_REPLY)?.toString() ?: ""
+            
+            // Add User Message to History
+            history.add(mapOf("role" to "user", "content" to replyText))
+            
+            // Update UI immediately
+            sendBotMessage(notificationId)
             
             // 1. Get Provider
             val providerName = SettingsManager.getProvider(this)
@@ -38,7 +60,9 @@ class MessagingService : Service() {
             val systemPrompt = SettingsManager.getSystemPrompt(this)
             
             if (apiKey.isBlank()) {
-                sendBotMessage("Error: Missing API Key for $providerName. Please configure it in the phone app.")
+                val error = "Error: Missing API Key for $providerName."
+                history.add(mapOf("role" to "assistant", "content" to error))
+                sendBotMessage(notificationId)
                 return START_NOT_STICKY
             }
 
@@ -49,23 +73,31 @@ class MessagingService : Service() {
                 OpenAIProvider(apiKey, systemPrompt)
             }
             
-            // 2. Send "Thinking..." state (Optional but good for UX)
-            // sendBotMessage("Thinking...") 
+            val historyContext = history.dropLast(1) 
 
-            // 3. Call API
-            llm.chat(replyText, emptyList()) { response ->
-                // Switch to main thread if needed, but Service runs on main by default mostly, 
-                // callbacks from OkHttp are background.
+            llm.chat(replyText, historyContext) { response ->
                 android.os.Handler(android.os.Looper.getMainLooper()).post {
-                    sendBotMessage(response)
+                    // Add Bot Response to History
+                    history.add(mapOf("role" to "assistant", "content" to response))
+                    sendBotMessage(notificationId)
                 }
             }
+        } else if (intent?.action == "IGNORE_MARK_READ") {
+             val notificationId = intent.getIntExtra(KEY_NOTIFICATION_ID, -1)
+             if (notificationId != -1) {
+                 NotificationManagerCompat.from(this).cancel(notificationId)
+                 // Optional: Clear history to free memory? 
+                 // conversationHistory.remove(notificationId) 
+             }
         }
 
         return START_NOT_STICKY
     }
 
-    private fun sendBotMessage(text: String) {
+    private fun sendBotMessage(notificationId: Int) {
+        val history = conversationHistory[notificationId] ?: return
+        if (history.isEmpty()) return
+        
         // 1. Define Persona
         val me = Person.Builder().setName("Me").setKey("user_me").build()
         val bot = Person.Builder().setName("AI Bot").setKey("bot_ai").setIcon(androidx.core.graphics.drawable.IconCompat.createWithResource(this, android.R.drawable.ic_dialog_info)).build()
@@ -74,10 +106,15 @@ class MessagingService : Service() {
         val replyLabel = "Reply to AI"
         val remoteInput = RemoteInput.Builder(KEY_TEXT_REPLY).setLabel(replyLabel).build()
 
+        val replyIntent = Intent(this, MessagingService::class.java).apply { 
+            action = ACTION_REPLY 
+            putExtra(KEY_NOTIFICATION_ID, notificationId)
+        }
+        
         val replyPendingIntent = PendingIntent.getService(
             this,
-            0,
-            Intent(this, MessagingService::class.java).apply { action = ACTION_REPLY },
+            notificationId, // Use notificationId as requestCode to keep distinct
+            replyIntent,
             PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
@@ -92,11 +129,16 @@ class MessagingService : Service() {
          .build()
 
         // 3. Create Mark as Read Action
+        val markReadIntent = Intent(this, MessagingService::class.java).apply { 
+            action = "IGNORE_MARK_READ"
+            putExtra(KEY_NOTIFICATION_ID, notificationId)
+        }
+        
         val markReadPendingIntent = PendingIntent.getService(
             this,
-            1,
-            Intent(this, MessagingService::class.java).apply { action = "IGNORE_MARK_READ" },
-            PendingIntent.FLAG_IMMUTABLE
+            notificationId + 100000, // Offset to avoid conflict
+            markReadIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         
         val markReadAction = NotificationCompat.Action.Builder(
@@ -107,34 +149,41 @@ class MessagingService : Service() {
          .setShowsUserInterface(false)
          .build()
 
-        // 4. Create MessagingStyle
-        // Constructor takes the user "Me"
+        // 4. Create MessagingStyle from History
         val style = NotificationCompat.MessagingStyle(me)
-            .addMessage(text, System.currentTimeMillis(), bot)
             .setGroupConversation(false)
+            
+        history.forEach { entry ->
+            val timestamp = System.currentTimeMillis() 
+            val sender = if (entry["role"] == "user") null else bot 
+            style.addMessage(entry["content"], timestamp, sender)
+        }
 
         // 5. Build Notification
+        val lastMessage = history.last()["content"] ?: ""
+        
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setStyle(style)
             .addAction(replyAction)
             .addAction(markReadAction)
-            .setContentTitle("AI Bot") // Backup for non-messaging displays
-            .setContentText(text)
+            .setContentTitle("AI Bot") 
+            .setContentText(lastMessage)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .setOnlyAlertOnce(false)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             
-        // 6. Car Extender (Minimal)
+        // 6. Car Extender
         val carExtender = NotificationCompat.CarExtender()
             .setColor(resources.getColor(R.color.purple_500, theme))
+            .setUnreadConversation(null) 
         
         builder.extend(carExtender)
 
-        // 7. Check Init Permission again
+        // 7. Check Permission
         if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, builder.build())
+            NotificationManagerCompat.from(this).notify(notificationId, builder.build())
         }
     }
 
